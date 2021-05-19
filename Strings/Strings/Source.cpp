@@ -70,12 +70,50 @@ int m_strstr(LPCWSTR lpStr, LPCWSTR lpSubStr)
 	return iFirstIndex;
 }
 
+#pragma function(memset)
+LPVOID memset(LPVOID _Dst, int _Val, int _Size)
+{
+	if (!_Dst)
+		return NULL;
+
+	__asm
+	{
+		pushad
+		mov		edi, [_Dst]
+		mov		ecx, [_Size]
+		mov		eax, [_Val]
+		rep		stosb
+		popad
+	}
+
+	return NULL;
+}
+
+LPVOID m_memcpy(LPVOID _Dst, const void* _Src, int _Size)
+{
+	if (!_Dst || !_Src || !_Size)
+		return NULL;
+
+	__asm
+	{
+		pushad
+		mov		esi, [_Src]
+		mov		edi, [_Dst]
+		mov		ecx, [_Size]
+		rep		movsb
+		popad
+	}
+
+	return NULL;
+}
+
 struct String
 {
-private:
+protected:
 	LPWSTR lpArray = NULL;
 	int iSize = 0;
-
+	//
+	
 	bool DeallocMemory(LPVOID lpMem)
 	{
 		return HeapFree(GetProcessHeap(), 0, lpMem);
@@ -110,22 +148,22 @@ public:
 			if ((lpTempArray = AllocMemory(iCurrentSize * 2 + 1)) == NULL)
 				break;
 
-			memcpy(lpTempArray, this->lpArray, iCurrentSize * 2);
+			m_memcpy(lpTempArray, this->lpArray, iCurrentSize * 2);
 			if (!DeallocMemory(this->lpArray))
 				break;
 
 			if ((this->lpArray = AllocMemory(iSumString * 2 + 1)) == NULL)
 				break;
 
-			memcpy(this->lpArray, lpTempArray, iCurrentSize * 2);
-			memcpy(&this->lpArray[iCurrentSize], lpString, iNewString * 2);
+			m_memcpy(this->lpArray, lpTempArray, iCurrentSize * 2);
+			m_memcpy(&this->lpArray[iCurrentSize], lpString, iNewString * 2);
 			this->iSize = iSumString;
 
 		} while (false);
 
 		DeallocMemory(lpTempArray);
 	}
-	 
+
 	void equate(LPCWSTR lpString)
 	{
 		int iNewString = 0;
@@ -135,13 +173,15 @@ public:
 				break;
 
 			iNewString = m_strlen(lpString);
-			if (!DeallocMemory(this->lpArray))
-				break;
+
+			if(this->lpArray)
+				if (!DeallocMemory(this->lpArray))
+					break;
 
 			if ((this->lpArray = AllocMemory(iNewString * 2 + 1)) == NULL)
 				break;
 
-			memcpy(this->lpArray, lpString, iNewString * 2);
+			m_memcpy(this->lpArray, lpString, iNewString * 2);
 			this->iSize = iNewString;
 		} while (false);
 	}
@@ -191,8 +231,8 @@ public:
 			if ((lpTempArray = AllocMemory(iNewSize * 2 + 1)) == NULL)
 				break;
 
-			memcpy(lpTempArray, this->lpArray, iFirstIndex * 2);
-			memcpy(&lpTempArray[iFirstIndex], &this->lpArray[iLastIndex], (this->iSize - iLastIndex) * 2);
+			m_memcpy(lpTempArray, this->lpArray, iFirstIndex * 2);
+			m_memcpy(&lpTempArray[iFirstIndex], &this->lpArray[iLastIndex], (this->iSize - iLastIndex) * 2);
 
 			equate(lpTempArray);
 
@@ -325,7 +365,7 @@ public:
 		equate(lpNewString);
 	}
 
-	String(const String& stringStruct)
+	String(const String &stringStruct)
 	{
 		equate(stringStruct.lpArray);
 	}
@@ -336,9 +376,111 @@ public:
 	}
 };
 
+template <int N>
+struct StaticString
+{
+private:
+	WCHAR wData[N] = { 0 };
+	static constexpr DWORD dwKey[8] = { __TIME__[2], __TIME__[3], __TIME__[1], __TIME__[5], __TIME__[7], __TIME__[4], __TIME__[6], __TIME__[1] };
+
+public:
+	constexpr StaticString(LPCWSTR data)
+	{
+		for (int i = 0; i < N; i++) {
+			wData[i] = data[i] ^ dwKey[i % 2] % 32;
+		}
+	}
+
+	void deobfoscate(WCHAR* lpRet) const
+	{
+		int i = 0;
+		do
+		{
+			lpRet[i] = wData[i] ^ dwKey[i % 2] % 32;
+			i++;
+		} while (lpRet[i - 1]);
+	}
+};
+
+#define static_string(str) \
+    []() -> wchar_t* { \
+        constexpr int size = sizeof(str) / sizeof(str[0]); \
+        constexpr StaticString<size> obfuscated_str(str); \
+        static WCHAR original_string[size]; \
+        obfuscated_str.deobfoscate((WCHAR *)original_string); \
+        return original_string; \
+    }()
+
+struct RC4
+{
+private:
+	int binPassword[257] = { 0 };
+	int swap = 0;
+
+	void init(LPCWSTR lpKey, int iSize)
+	{
+		int b = 0, a = 0;
+
+		for (a = 0; a < 257; a++)
+		{
+			this->binPassword[a] = a;
+		}
+
+		for (a = 0; a < 257; a++)
+		{
+			b = (b + this->binPassword[a] + lpKey[a % iSize]) % 257;
+			this->swap = this->binPassword[a];
+			this->binPassword[a] = this->binPassword[b];
+			this->binPassword[b] = this->swap;
+		}
+	}
+
+	void rc4(LPWSTR lpRetArr, int iSize)
+	{
+		int tempPassword[257];
+		int i = 0, j = 0;
+
+		m_memcpy(tempPassword, this->binPassword, 257 * sizeof(int));
+		for (int x = 0; x < iSize; x++)
+		{
+			i = (i + 1) % 257;
+			j = (j + tempPassword[i]) % 257;
+			this->swap = tempPassword[i];
+			tempPassword[i] = tempPassword[j];
+			tempPassword[j] = this->swap;
+			lpRetArr[x] ^= tempPassword[(tempPassword[i] + tempPassword[j]) % 257];
+		}
+	}
+
+public:
+
+	void free()
+	{
+		memset(this->binPassword, 0, 256);
+		this->swap = 0;
+	}
+
+	String protect(LPCWSTR lpData)
+	{
+		String tempString = lpData;
+		rc4(tempString.data(), tempString.length());
+		return tempString;
+	}
+
+	RC4(LPCWSTR lpKey)
+	{
+		init(lpKey, m_strlen(lpKey));
+	}
+
+	~RC4()
+	{
+		free();
+	}
+};
+
 int main()
 {
-	String str = L"Hello, world, Nibbers!!!";
+	String str = static_string(L"Hello, world, Nibbers!!!");
 
 	MessageBoxW(0, str.data(), 0, 0);
 }
